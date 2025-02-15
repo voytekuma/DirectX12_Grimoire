@@ -1,6 +1,7 @@
 #include <Windows.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#include <DirectXMath.h>
 #include <vector>
 
 #pragma comment(lib, "d3d12.lib")
@@ -11,6 +12,7 @@
 #endif
 
 using namespace std;
+using namespace DirectX;
 
 const static int WINDOW_WIDTH = 1920;
 const static int WINDOW_HEIGHT = 1080;
@@ -23,6 +25,7 @@ ID3D12GraphicsCommandList* _cmdList = nullptr;
 ID3D12CommandQueue* _cmdQueue = nullptr;
 ID3D12DescriptorHeap* _rtvHeaps = nullptr;
 ID3D12Fence* _fence = nullptr;
+ID3D12Resource* _vertBuff = nullptr;
 UINT64 _fenceVal = 0;
 vector<ID3D12Resource*> _backBuffers;
 
@@ -193,6 +196,48 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	auto rtvH = _rtvHeaps->GetCPUDescriptorHandleForHeapStart();
 	rtvH.ptr += bbIdx * _dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	_cmdList->OMSetRenderTargets(1, &rtvH, true, nullptr);
+
+	XMFLOAT3 vertices[] = {
+		{-1.f, -1.f, 0.f},
+		{-1.f, 1.f, 0.f},
+		{1.f, -1.f, 0.f}
+	};
+
+	// 頂点バッファーの生成
+	D3D12_HEAP_PROPERTIES heapprop = {};
+	heapprop.Type = D3D12_HEAP_TYPE_UPLOAD;
+	heapprop.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+	heapprop.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+	D3D12_RESOURCE_DESC resdesc = {};
+	resdesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	resdesc.Width = sizeof(vertices);
+	resdesc.Height = 1;
+	resdesc.DepthOrArraySize = 1;
+	resdesc.MipLevels = 1;
+	resdesc.Format = DXGI_FORMAT_UNKNOWN;
+	resdesc.SampleDesc.Count = 1;
+	resdesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+	resdesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	result = _dev->CreateCommittedResource(
+		&heapprop,
+		D3D12_HEAP_FLAG_NONE,
+		&resdesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&_vertBuff)
+	);
+
+	// Map
+	XMFLOAT3* vertMap = nullptr;
+	result = _vertBuff->Map(0, nullptr, (void**)&vertMap);
+	copy(begin(vertices), end(vertices), vertMap);
+	_vertBuff->Unmap(0, nullptr);
+
+	// 頂点バッファービュー作成
+	D3D12_VERTEX_BUFFER_VIEW vbView = {};
+	vbView.BufferLocation = _vertBuff->GetGPUVirtualAddress();
+	vbView.SizeInBytes = sizeof(vertices);
+	vbView.StrideInBytes = sizeof(vertices[0]);
 
 	// 画面のクリア
 	float clearColor[] = { 1.f, 1.f, 0.f, 1.f };
