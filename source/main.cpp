@@ -200,9 +200,15 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	_cmdList->OMSetRenderTargets(1, &rtvH, true, nullptr);
 
 	XMFLOAT3 vertices[] = {
-		{-1.f, -1.f, 0.f},
-		{-1.f, 1.f, 0.f},
-		{1.f, -1.f, 0.f}
+		{ -0.4f, -0.7f, 0.f },
+		{ -0.4f, 0.7f, 0.f },
+		{ 0.4f, -0.7f, 0.f },
+		{ 0.4f, 0.7f, 0.0f }
+	};
+
+	unsigned short indices[] = {
+		0, 1, 2,
+		2, 1, 3,
 	};
 
 	// 頂点バッファーの生成
@@ -229,11 +235,28 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		IID_PPV_ARGS(&_vertBuff)
 	);
 
+	// インデックスバッファー
+	ID3D12Resource* idxBuff = nullptr;
+	resdesc.Width = sizeof(indices);
+	result = _dev->CreateCommittedResource(
+		&heapprop,
+		D3D12_HEAP_FLAG_NONE,
+		&resdesc,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&idxBuff)
+	);
+
 	// Map
 	XMFLOAT3* vertMap = nullptr;
 	result = _vertBuff->Map(0, nullptr, (void**)&vertMap);
 	copy(begin(vertices), end(vertices), vertMap);
 	_vertBuff->Unmap(0, nullptr);
+	unsigned short* mappedIdx = nullptr;
+	result = idxBuff->Map(0, nullptr, (void**)&mappedIdx);
+	copy(begin(indices), end(indices), mappedIdx);
+	idxBuff->Unmap(0, nullptr);
+
 
 	// シェーダー読み込み
 	ID3DBlob* vsBlob = nullptr;
@@ -272,6 +295,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		},
 	};
 
+	// インデックスバッファビュー
+	D3D12_INDEX_BUFFER_VIEW ibView = {};
+	ibView.BufferLocation = idxBuff->GetGPUVirtualAddress();
+	ibView.Format = DXGI_FORMAT_R16_UINT;
+	ibView.SizeInBytes = sizeof(indices);
+
 	// ルートシグネチャ
 	D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
 	rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -292,7 +321,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
 	// グラフィックパイプラインステート
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC gpipeline = {};
-	gpipeline.pRootSignature = nullptr;
 	gpipeline.VS.pShaderBytecode = vsBlob->GetBufferPointer();
 	gpipeline.VS.BytecodeLength = vsBlob->GetBufferSize();
 	gpipeline.PS.pShaderBytecode = psBlob->GetBufferPointer();
@@ -323,6 +351,20 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	ID3D12PipelineState* pipelineState = nullptr;
 	result = _dev->CreateGraphicsPipelineState(&gpipeline, IID_PPV_ARGS(&pipelineState));
 
+	// ビューポート設定
+	D3D12_VIEWPORT viewport = {};
+	viewport.Width = WINDOW_WIDTH;
+	viewport.Height = WINDOW_HEIGHT;
+	viewport.TopLeftX = 0;
+	viewport.TopLeftY = 0;
+	viewport.MaxDepth = 1.f;
+	viewport.MinDepth = 0.f;
+	D3D12_RECT scissorRect = {};
+	scissorRect.top - 0;
+	scissorRect.left = 0;
+	scissorRect.right = scissorRect.left + WINDOW_WIDTH;
+	scissorRect.bottom = scissorRect.top + WINDOW_HEIGHT;
+
 	// 頂点バッファービュー作成
 	D3D12_VERTEX_BUFFER_VIEW vbView = {};
 	vbView.BufferLocation = _vertBuff->GetGPUVirtualAddress();
@@ -332,6 +374,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	// 画面のクリア
 	float clearColor[] = { 1.f, 1.f, 0.f, 1.f };
 	_cmdList->ClearRenderTargetView(rtvH, clearColor, 0, nullptr);
+
+	// 描画命令
+	_cmdList->SetPipelineState(pipelineState);
+	_cmdList->SetGraphicsRootSignature(rootsignature);
+	_cmdList->RSSetViewports(1, &viewport);
+	_cmdList->RSSetScissorRects(1, &scissorRect);
+	_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	_cmdList->IASetVertexBuffers(0, 1, &vbView);
+	_cmdList->IASetIndexBuffer(&ibView);
+	_cmdList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
 	// バリア設定
 	barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
