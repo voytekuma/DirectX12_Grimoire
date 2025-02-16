@@ -3,11 +3,13 @@
 #include <dxgi1_6.h>
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
+#include <DirectXTex.h>
 #include <vector>
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
+#pragma comment(lib, "DirectXTex.lib")
 
 #ifdef _DEBUG
 #include <iostream>
