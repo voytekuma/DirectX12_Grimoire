@@ -27,4 +27,9 @@
       <Filter>ソース ファイル</Filter>
     </FxCompile>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="source\BasicShaderHeader.hlsli">
+      <Filter>ソース ファイル</Filter>
+    </None>
+  </ItemGroup>
 </Project>

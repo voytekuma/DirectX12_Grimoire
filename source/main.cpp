@@ -31,6 +31,12 @@ ID3D12Resource* _vertBuff = nullptr;
 UINT64 _fenceVal = 0;
 vector<ID3D12Resource*> _backBuffers;
 
+struct Vertex
+{
+	XMFLOAT3 pos;
+	XMFLOAT2 uv;
+};
+
 LRESULT WindowProcedure(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
 	if (msg == WM_DESTROY)
@@ -199,11 +205,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	rtvH.ptr += bbIdx * _dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 	_cmdList->OMSetRenderTargets(1, &rtvH, true, nullptr);
 
-	XMFLOAT3 vertices[] = {
-		{ -0.4f, -0.7f, 0.f },
-		{ -0.4f, 0.7f, 0.f },
-		{ 0.4f, -0.7f, 0.f },
-		{ 0.4f, 0.7f, 0.0f }
+	Vertex vertices[] = {
+		{{ -0.4f, -0.7f, 0.f }, { 0.f, 1.f }},
+		{{ -0.4f, 0.7f, 0.f }, { 0.f, 0.f }},
+		{{ 0.4f, -0.7f, 0.f }, { 1.f, 1.f }},
+		{{ 0.4f, 0.7f, 0.0f }, { 1.f, 0.f }},
 	};
 
 	unsigned short indices[] = {
@@ -248,7 +254,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	);
 
 	// Map
-	XMFLOAT3* vertMap = nullptr;
+	Vertex* vertMap = nullptr;
 	result = _vertBuff->Map(0, nullptr, (void**)&vertMap);
 	copy(begin(vertices), end(vertices), vertMap);
 	_vertBuff->Unmap(0, nullptr);
@@ -293,6 +299,14 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 			D3D12_APPEND_ALIGNED_ELEMENT,
 			D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
 		},
+		{
+			"TEXCOORD",
+			0,
+			DXGI_FORMAT_R32G32_FLOAT,
+			0,
+			D3D12_APPEND_ALIGNED_ELEMENT,
+			D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
+		}
 	};
 
 	// インデックスバッファビュー
