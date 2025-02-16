@@ -55,6 +55,11 @@ void EnableDebugLayer()
 	debugLayer->Release();
 }
 
+struct TexRGBA
+{
+	unsigned char R, G, B, A;
+};
+
 #ifdef _DEBUG
 int main()
 {
@@ -120,6 +125,16 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		}
 	}
 
+	// テクスチャデータの作成
+	vector<TexRGBA> texturedata(256 * 256);
+	for (auto& rgba : texturedata)
+	{
+		rgba.R = rand() % 256;
+		rgba.G = rand() % 256;
+		rgba.B = rand() % 256;
+		rgba.A = 255;
+	}
+
 	// Direct3Dデバイスの初期化
 	D3D_FEATURE_LEVEL featureLevel;
 	D3D_FEATURE_LEVEL levels[] = {
@@ -164,13 +179,22 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	swapchainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 	result = _dxgiFactory->CreateSwapChainForHwnd(_cmdQueue, hwnd, &swapchainDesc, nullptr, nullptr, (IDXGISwapChain1**)&_swapchain);
 
-	// ディスクリプタヒープの作成
+	// レンダーターゲット用ディスクリプタヒープの作成
 	D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
 	heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 	heapDesc.NodeMask = 0;
 	heapDesc.NumDescriptors = 2;
 	heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
 	result = _dev->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&_rtvHeaps));
+
+	// シェーダーリソース用ディスクリプタヒープの作成
+	ID3D12DescriptorHeap* texDescHeap = nullptr;
+	D3D12_DESCRIPTOR_HEAP_DESC texHeapDesc = {};
+	texHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+	texHeapDesc.NodeMask = 0;
+	texHeapDesc.NumDescriptors = 1;
+	texHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+	result = _dev->CreateDescriptorHeap(&texHeapDesc, IID_PPV_ARGS(&texDescHeap));
 
 	// フェンスの作成
 	result = _dev->CreateFence(_fenceVal, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence));
@@ -253,6 +277,41 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		IID_PPV_ARGS(&idxBuff)
 	);
 
+	// テクスチャバッファー
+	D3D12_HEAP_PROPERTIES texHeapprop = {};
+	texHeapprop.Type = D3D12_HEAP_TYPE_CUSTOM;
+	texHeapprop.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_WRITE_BACK;
+	texHeapprop.MemoryPoolPreference = D3D12_MEMORY_POOL_L0;
+	texHeapprop.CreationNodeMask = 0;
+	texHeapprop.VisibleNodeMask = 0;
+	D3D12_RESOURCE_DESC texResdesc = {};
+	texResdesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	texResdesc.Width = 256;
+	texResdesc.Height = 256;
+	texResdesc.DepthOrArraySize = 1;
+	texResdesc.SampleDesc.Count = 1;
+	texResdesc.SampleDesc.Quality = 0;
+	texResdesc.MipLevels = 1;
+	texResdesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+	texResdesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+	texResdesc.Flags = D3D12_RESOURCE_FLAG_NONE;
+	ID3D12Resource* texBuff = nullptr;
+	result = _dev->CreateCommittedResource(
+		&texHeapprop,
+		D3D12_HEAP_FLAG_NONE,
+		&texResdesc,
+		D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+		nullptr,
+		IID_PPV_ARGS(&texBuff)
+	);
+	result = texBuff->WriteToSubresource(
+		0,
+		nullptr,
+		texturedata.data(),
+		sizeof(TexRGBA) * 256,
+		sizeof(TexRGBA) * texturedata.size()
+	);
+
 	// Map
 	Vertex* vertMap = nullptr;
 	result = _vertBuff->Map(0, nullptr, (void**)&vertMap);
@@ -309,15 +368,57 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		}
 	};
 
+	// 頂点バッファービュー作成
+	D3D12_VERTEX_BUFFER_VIEW vbView = {};
+	vbView.BufferLocation = _vertBuff->GetGPUVirtualAddress();
+	vbView.SizeInBytes = sizeof(vertices);
+	vbView.StrideInBytes = sizeof(vertices[0]);
+
 	// インデックスバッファビュー
 	D3D12_INDEX_BUFFER_VIEW ibView = {};
 	ibView.BufferLocation = idxBuff->GetGPUVirtualAddress();
 	ibView.Format = DXGI_FORMAT_R16_UINT;
 	ibView.SizeInBytes = sizeof(indices);
 
+	// シェーダーリソースビュー
+	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+	srvDesc.Texture2D.MipLevels = 1;
+	_dev->CreateShaderResourceView(texBuff, &srvDesc, texDescHeap->GetCPUDescriptorHandleForHeapStart());
+
+	// ルートパラメータ
+	D3D12_DESCRIPTOR_RANGE descTblRange = {};
+	descTblRange.NumDescriptors = 1;
+	descTblRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+	descTblRange.BaseShaderRegister = 0;
+	descTblRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+	D3D12_ROOT_PARAMETER rootparam = {};
+	rootparam.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+	rootparam.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+	rootparam.DescriptorTable.pDescriptorRanges = &descTblRange;
+	rootparam.DescriptorTable.NumDescriptorRanges = 1;
+
+	// サンプラー
+	D3D12_STATIC_SAMPLER_DESC samplerDesc = {};
+	samplerDesc.AddressU = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+	samplerDesc.AddressV = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+	samplerDesc.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+	samplerDesc.BorderColor = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+	samplerDesc.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+	samplerDesc.MaxLOD = D3D12_FLOAT32_MAX;
+	samplerDesc.MinLOD = 0.f;
+	samplerDesc.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+	samplerDesc.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;
+
 	// ルートシグネチャ
 	D3D12_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
 	rootSignatureDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+	rootSignatureDesc.pParameters = &rootparam;
+	rootSignatureDesc.NumParameters = 1;
+	rootSignatureDesc.pStaticSamplers = &samplerDesc;
+	rootSignatureDesc.NumStaticSamplers = 1;
 	ID3DBlob* rootSigBlob = nullptr;
 	result = D3D12SerializeRootSignature(
 		&rootSignatureDesc,
@@ -379,12 +480,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	scissorRect.right = scissorRect.left + WINDOW_WIDTH;
 	scissorRect.bottom = scissorRect.top + WINDOW_HEIGHT;
 
-	// 頂点バッファービュー作成
-	D3D12_VERTEX_BUFFER_VIEW vbView = {};
-	vbView.BufferLocation = _vertBuff->GetGPUVirtualAddress();
-	vbView.SizeInBytes = sizeof(vertices);
-	vbView.StrideInBytes = sizeof(vertices[0]);
-
 	// 画面のクリア
 	float clearColor[] = { 1.f, 1.f, 0.f, 1.f };
 	_cmdList->ClearRenderTargetView(rtvH, clearColor, 0, nullptr);
@@ -392,6 +487,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	// 描画命令
 	_cmdList->SetPipelineState(pipelineState);
 	_cmdList->SetGraphicsRootSignature(rootsignature);
+	_cmdList->SetDescriptorHeaps(1, &texDescHeap);
+	_cmdList->SetGraphicsRootDescriptorTable(0, texDescHeap->GetGPUDescriptorHandleForHeapStart());
 	_cmdList->RSSetViewports(1, &viewport);
 	_cmdList->RSSetScissorRects(1, &scissorRect);
 	_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
