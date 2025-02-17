@@ -22,6 +22,8 @@ using namespace DirectX;
 const static int WINDOW_WIDTH = 1920;
 const static int WINDOW_HEIGHT = 1080;
 
+constexpr size_t pmdvertex_size = 38;
+
 ID3D12Device* _dev = nullptr;
 IDXGIFactory6* _dxgiFactory = nullptr;
 IDXGISwapChain4* _swapchain = nullptr;
@@ -61,6 +63,25 @@ void EnableDebugLayer()
 struct TexRGBA
 {
 	unsigned char R, G, B, A;
+};
+
+// PMDヘッダー構造体
+struct PMDHeader
+{
+	float version;
+	char model_name[20];
+	char comment[256];
+};
+
+// P<D頂点構造体
+struct PMDVertex
+{
+	XMFLOAT3 pos;
+	XMFLOAT3 normal;
+	XMFLOAT2 uv;
+	unsigned short boneNo[2];
+	unsigned char boneWeight;
+	unsigned char edgeFlg;
 };
 
 size_t AlignmentedSize(size_t size, size_t alignment)
@@ -154,6 +175,18 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	);
 	const Image* img = scratchImg.GetImage(0, 0, 0);
 
+	// pmdデータの読み込み
+	PMDHeader pmdheader = {};
+	char signature[3] = {};
+	FILE* fp = nullptr;
+	fopen_s(&fp, "Model/初音ミク.pmd", "rb");
+	fread(signature, sizeof(signature), 1, fp);
+	fread(&pmdheader, sizeof(pmdheader), 1, fp);
+	unsigned int vertNum;
+	fread(&vertNum, sizeof(vertNum), 1, fp);
+	vector<unsigned char> vertices(vertNum * pmdvertex_size);
+	fread(vertices.data(), vertices.size(), 1, fp);
+
 	// Direct3Dデバイスの初期化
 	D3D_FEATURE_LEVEL featureLevel;
 	D3D_FEATURE_LEVEL levels[] = {
@@ -233,61 +266,44 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		_dev->CreateRenderTargetView(_backBuffers[i], &rtvDesc, handle);
 	}
 
-	Vertex vertices[] = {
-		{{ -1.0f, -1.0f,  0.0f }, { 0.f, 1.f }},
-		{{ -1.0f, 1.0f, 0.0f }, { 0.f, 0.f }},
-		{{ 1.0f, -1.0f, 0.0f }, { 1.f, 1.f }},
-		{{ 1.0f, 1.0f, 0.0f }, { 1.f, 0.f }},
-	};
-
 	unsigned short indices[] = {
 		0, 1, 2,
 		2, 1, 3,
 	};
 
+	// カメラ設定
 	XMMATRIX matrix = XMMatrixRotationY(XM_PIDIV4);
-	XMFLOAT3 eye(0, 0, 5);
-	XMFLOAT3 target(0, 0, 0);
+	XMFLOAT3 eye(0, 10, -15);
+	XMFLOAT3 target(0, 10, 0);
 	XMFLOAT3 up(0, 1, 0);
 	matrix *= XMMatrixLookAtLH(XMLoadFloat3(&eye), XMLoadFloat3(&target), XMLoadFloat3(&up));
 	matrix *= XMMatrixPerspectiveFovLH(
 		XM_PIDIV2,
 		static_cast<float>(WINDOW_WIDTH) / static_cast<float>(WINDOW_HEIGHT),
 		1.0f,
-		10.0f
+		100.0f
 	);
 
 	// 頂点バッファーの生成
-	D3D12_HEAP_PROPERTIES heapprop = {};
-	heapprop.Type = D3D12_HEAP_TYPE_UPLOAD;
-	heapprop.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-	heapprop.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-	D3D12_RESOURCE_DESC resdesc = {};
-	resdesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-	resdesc.Width = sizeof(vertices);
-	resdesc.Height = 1;
-	resdesc.DepthOrArraySize = 1;
-	resdesc.MipLevels = 1;
-	resdesc.Format = DXGI_FORMAT_UNKNOWN;
-	resdesc.SampleDesc.Count = 1;
-	resdesc.Flags = D3D12_RESOURCE_FLAG_NONE;
-	resdesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	D3D12_HEAP_PROPERTIES vertHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	D3D12_RESOURCE_DESC vertResDesc = CD3DX12_RESOURCE_DESC::Buffer(vertices.size());
 	result = _dev->CreateCommittedResource(
-		&heapprop,
+		&vertHeapProp,
 		D3D12_HEAP_FLAG_NONE,
-		&resdesc,
+		&vertResDesc,
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
 		IID_PPV_ARGS(&_vertBuff)
 	);
 
 	// インデックスバッファー
+	D3D12_HEAP_PROPERTIES idxHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+	D3D12_RESOURCE_DESC idxResDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(indices));
 	ID3D12Resource* idxBuff = nullptr;
-	resdesc.Width = sizeof(indices);
 	result = _dev->CreateCommittedResource(
-		&heapprop,
+		&idxHeapProp,
 		D3D12_HEAP_FLAG_NONE,
-		&resdesc,
+		&idxResDesc,
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
 		IID_PPV_ARGS(&idxBuff)
@@ -362,7 +378,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	);
 
 	// 頂点バッファーMap
-	Vertex* vertMap = nullptr;
+	unsigned char* vertMap = nullptr;
 	result = _vertBuff->Map(0, nullptr, (void**)&vertMap);
 	copy(begin(vertices), end(vertices), vertMap);
 	_vertBuff->Unmap(0, nullptr);
@@ -426,20 +442,52 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 			D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
 		},
 		{
+			"NORMAL",
+			0,
+			DXGI_FORMAT_R32G32B32_FLOAT,
+			0,
+			D3D12_APPEND_ALIGNED_ELEMENT,
+			D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA
+		},
+		{
 			"TEXCOORD",
 			0,
 			DXGI_FORMAT_R32G32_FLOAT,
 			0,
 			D3D12_APPEND_ALIGNED_ELEMENT,
-			D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,
-		}
+			D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA
+		},
+		{
+			"BONE_NO",
+			0,
+			DXGI_FORMAT_R16G16_UINT,
+			0,
+			D3D12_APPEND_ALIGNED_ELEMENT,
+			D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA
+		},
+		{
+			"WEIGHT",
+			0,
+			DXGI_FORMAT_R8_UINT,
+			0,
+			D3D12_APPEND_ALIGNED_ELEMENT,
+			D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA
+		},
+		{
+			"EDGE_FLG",
+			0,
+			DXGI_FORMAT_R8_UINT,
+			0,
+			D3D12_APPEND_ALIGNED_ELEMENT,
+			D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA
+		},
 	};
 
 	// 頂点バッファービュー作成
 	D3D12_VERTEX_BUFFER_VIEW vbView = {};
 	vbView.BufferLocation = _vertBuff->GetGPUVirtualAddress();
-	vbView.SizeInBytes = sizeof(vertices);
-	vbView.StrideInBytes = sizeof(vertices[0]);
+	vbView.SizeInBytes = vertices.size();
+	vbView.StrideInBytes = pmdvertex_size;
 
 	// インデックスバッファビュー
 	D3D12_INDEX_BUFFER_VIEW ibView = {};
@@ -629,7 +677,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		_cmdList->OMSetRenderTargets(1, &rtvH, true, nullptr);
 
 		// 画面のクリア
-		float clearColor[] = { 1.f, 1.f, 0.f, 1.f };
+		float clearColor[] = { 1.f, 1.f, 1.f, 1.f };
 		_cmdList->ClearRenderTargetView(rtvH, clearColor, 0, nullptr);
 
 		// 描画命令
@@ -643,7 +691,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		_cmdList->IASetVertexBuffers(0, 1, &vbView);
 		_cmdList->IASetIndexBuffer(&ibView);
 
-		_cmdList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+		_cmdList->DrawInstanced(vertNum, 1, 0, 0);
 
 		// バリア設定
 		barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
