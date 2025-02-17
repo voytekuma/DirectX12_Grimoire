@@ -6,3 +6,9 @@ struct Output
 
 Texture2D<float4> tex : register(t0);
 SamplerState smp : register(s0);
+
+// 定数バッファー
+cbuffer cbuff0 : register(b0)
+{
+    matrix mat;
+}
