@@ -598,65 +598,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	_cmdAllocator->Reset();
 	_cmdList->Reset(_cmdAllocator, nullptr);
 
-	// バックバッファのインデックス取得
-	int bbIdx = _swapchain->GetCurrentBackBufferIndex();
-
-	// バリア設定
-	barrierDesc.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-	barrierDesc.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-	barrierDesc.Transition.pResource = _backBuffers[bbIdx];
-	barrierDesc.Transition.Subresource = 0;
-	barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-	barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-	_cmdList->ResourceBarrier(1, &barrierDesc);
-
-	// レンダーターゲットを設定
-	auto rtvH = _rtvHeaps->GetCPUDescriptorHandleForHeapStart();
-	rtvH.ptr += bbIdx * _dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-	_cmdList->OMSetRenderTargets(1, &rtvH, true, nullptr);
-
-	// 画面のクリア
-	float clearColor[] = { 1.f, 1.f, 0.f, 1.f };
-	_cmdList->ClearRenderTargetView(rtvH, clearColor, 0, nullptr);
-
-	// 描画命令
-	_cmdList->SetPipelineState(pipelineState);
-	_cmdList->SetGraphicsRootSignature(rootsignature);
-	_cmdList->SetDescriptorHeaps(1, &basicDescHeap);
-	_cmdList->SetGraphicsRootDescriptorTable(0, basicDescHeap->GetGPUDescriptorHandleForHeapStart());
-	_cmdList->RSSetViewports(1, &viewport);
-	_cmdList->RSSetScissorRects(1, &scissorRect);
-	_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	_cmdList->IASetVertexBuffers(0, 1, &vbView);
-	_cmdList->IASetIndexBuffer(&ibView);
-
-	_cmdList->DrawIndexedInstanced(6, 1, 0, 0, 0);
-
-	// バリア設定
-	barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-	barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-	_cmdList->ResourceBarrier(1, &barrierDesc);
-
-	// コマンド実行
-	_cmdList->Close();
-	ID3D12CommandList* cmdLists2[] = { _cmdList };
-	_cmdQueue->ExecuteCommandLists(1, cmdLists2);
-
-	// GPU処理待ち
-	_cmdQueue->Signal(_fence, ++_fenceVal);
-	if (_fence->GetCompletedValue() != _fenceVal) {
-		auto event = CreateEvent(nullptr, false, false, nullptr);
-		_fence->SetEventOnCompletion(_fenceVal, event);
-		WaitForSingleObject(event, INFINITE);
-		CloseHandle(event);
-	}
-
-	// コマンドリスト・アロケータリセット
-	_cmdAllocator->Reset();
-	_cmdList->Reset(_cmdAllocator, nullptr);
-
-	// スワップチェーン実行
-	_swapchain->Present(1, 0);
 
 	MSG msg = {};
 
@@ -669,6 +610,66 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 		if (msg.message == WM_QUIT) {
 			break;
 		}
+
+		// バックバッファのインデックス取得
+		int bbIdx = _swapchain->GetCurrentBackBufferIndex();
+
+		// バリア設定
+		barrierDesc.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+		barrierDesc.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
+		barrierDesc.Transition.pResource = _backBuffers[bbIdx];
+		barrierDesc.Transition.Subresource = 0;
+		barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+		barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		_cmdList->ResourceBarrier(1, &barrierDesc);
+
+		// レンダーターゲットを設定
+		auto rtvH = _rtvHeaps->GetCPUDescriptorHandleForHeapStart();
+		rtvH.ptr += bbIdx * _dev->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+		_cmdList->OMSetRenderTargets(1, &rtvH, true, nullptr);
+
+		// 画面のクリア
+		float clearColor[] = { 1.f, 1.f, 0.f, 1.f };
+		_cmdList->ClearRenderTargetView(rtvH, clearColor, 0, nullptr);
+
+		// 描画命令
+		_cmdList->SetPipelineState(pipelineState);
+		_cmdList->SetGraphicsRootSignature(rootsignature);
+		_cmdList->SetDescriptorHeaps(1, &basicDescHeap);
+		_cmdList->SetGraphicsRootDescriptorTable(0, basicDescHeap->GetGPUDescriptorHandleForHeapStart());
+		_cmdList->RSSetViewports(1, &viewport);
+		_cmdList->RSSetScissorRects(1, &scissorRect);
+		_cmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		_cmdList->IASetVertexBuffers(0, 1, &vbView);
+		_cmdList->IASetIndexBuffer(&ibView);
+
+		_cmdList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+
+		// バリア設定
+		barrierDesc.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+		barrierDesc.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+		_cmdList->ResourceBarrier(1, &barrierDesc);
+
+		// コマンド実行
+		_cmdList->Close();
+		ID3D12CommandList* cmdLists2[] = { _cmdList };
+		_cmdQueue->ExecuteCommandLists(1, cmdLists2);
+
+		// GPU処理待ち
+		_cmdQueue->Signal(_fence, ++_fenceVal);
+		if (_fence->GetCompletedValue() != _fenceVal) {
+			auto event = CreateEvent(nullptr, false, false, nullptr);
+			_fence->SetEventOnCompletion(_fenceVal, event);
+			WaitForSingleObject(event, INFINITE);
+			CloseHandle(event);
+		}
+
+		// コマンドリスト・アロケータリセット
+		_cmdAllocator->Reset();
+		_cmdList->Reset(_cmdAllocator, nullptr);
+
+		// スワップチェーン実行
+		_swapchain->Present(1, 0);
 	}
 
 	UnregisterClass(w.lpszClassName, w.hInstance);
