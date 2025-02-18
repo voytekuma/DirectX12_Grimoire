@@ -9,8 +9,10 @@ Output BasicVS(
 )
 {
     Output output;
-    output.svpos = mul(mat, pos);
+    output.svpos = mul(mul(viewproj, world), pos);
+    normal.z = 0;
     output.uv = uv;
+    output.normal = mul(world, normal);
     return output;
 }
 
