@@ -80,15 +80,18 @@ struct PMDHeader
 };
 
 // P<D頂点構造体
+#pragma pack(push, 1)
 struct PMDVertex
 {
 	XMFLOAT3 pos;
 	XMFLOAT3 normal;
 	XMFLOAT2 uv;
-	unsigned short boneNo[2];
-	unsigned char boneWeight;
-	unsigned char edgeFlg;
+	uint16_t bone_no[2];
+	uint8_t  weight;
+	uint8_t  EdgeFlag;
+	uint16_t dummy;
 };
+#pragma pack(pop)
 
 size_t AlignmentedSize(size_t size, size_t alignment)
 {
@@ -192,8 +195,11 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	// pmd頂点データ読み込み
 	unsigned int vertNum;
 	fread(&vertNum, sizeof(vertNum), 1, fp);
-	vector<unsigned char> vertices(vertNum * pmdvertex_size);
-	fread(vertices.data(), vertices.size(), 1, fp);
+	vector<PMDVertex> vertices(vertNum);
+	for (auto i = 0; i < vertNum; i++)
+	{
+		fread(&vertices[i], pmdvertex_size, 1, fp);
+	}
 
 	// pmdインデックスデータの読み込み
 	vector<unsigned short> indices;
@@ -303,7 +309,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
 	// 頂点バッファーの生成
 	D3D12_HEAP_PROPERTIES vertHeapProp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-	D3D12_RESOURCE_DESC vertResDesc = CD3DX12_RESOURCE_DESC::Buffer(vertices.size());
+	D3D12_RESOURCE_DESC vertResDesc = CD3DX12_RESOURCE_DESC::Buffer(vertices.size() * sizeof(PMDVertex));
 	result = _dev->CreateCommittedResource(
 		&vertHeapProp,
 		D3D12_HEAP_FLAG_NONE,
@@ -421,7 +427,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	);
 
 	// 頂点バッファーMap
-	unsigned char* vertMap = nullptr;
+	PMDVertex* vertMap = nullptr;
 	result = _vertBuff->Map(0, nullptr, (void**)&vertMap);
 	copy(begin(vertices), end(vertices), vertMap);
 	_vertBuff->Unmap(0, nullptr);
@@ -530,8 +536,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 	// 頂点バッファービュー作成
 	D3D12_VERTEX_BUFFER_VIEW vbView = {};
 	vbView.BufferLocation = _vertBuff->GetGPUVirtualAddress();
-	vbView.SizeInBytes = vertices.size();
-	vbView.StrideInBytes = pmdvertex_size;
+	vbView.SizeInBytes = static_cast<UINT>(vertices.size() * sizeof(PMDVertex));
+	vbView.StrideInBytes = sizeof(PMDVertex);
 
 	// インデックスバッファビュー
 	D3D12_INDEX_BUFFER_VIEW ibView = {};
